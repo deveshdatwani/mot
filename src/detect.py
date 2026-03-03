@@ -8,7 +8,7 @@ from lib.tracker import track
 
 
 model = YOLO("/home/deveshdatwani/Downloads/yolov8n.pt")
-img_dir = "/home/deveshdatwani/mot/data/a9_dataset_r02_s01/images/s110_camera_basler_south2_8mm"
+img_dir = "/home/deveshdatwani/mot/data/a9_dataset_r02_s01/images/s110_camera_basler_south1_8mm"
 json_dir = "/home/deveshdatwani/mot/data/a9_dataset_r02_s01/labels_point_clouds/s110_lidar_ouster_south"
 
 img_files = sorted(glob.glob(os.path.join(img_dir, "*.jpg")))
@@ -26,8 +26,8 @@ if __name__ == "__main__":
         draw_yolov8_detections(img, results)
         prev_time = draw_fps(img, prev_time)
         meta = json.load(open(json_files[0]))
-        T_lidar_cam = get_lidar_to_cam("s110_camera_basler_south2_8mm", meta)
-        K = get_camera_K("s110_camera_basler_south2_8mm", meta)
+        T_lidar_cam = get_lidar_to_cam("s110_camera_basler_south1_8mm", meta)
+        K = get_camera_K("s110_camera_basler_south1_8mm", meta)
         tracks, next_id = track(results, img, tracks, next_id)
         cv2.imshow("img", img)
         if cv2.waitKey(1) & 0xFF == ord('q'): break
