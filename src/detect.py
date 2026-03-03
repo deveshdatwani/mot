@@ -16,7 +16,8 @@ json_files = sorted(glob.glob(os.path.join(json_dir, "*.json")))
 GLOBAL = 0
 
 prev_time = 0
-curr = np.array([])
+object_log, next_id = {}, 0
+tracks = {}
 
 if __name__ == "__main__":
     for img_path in img_files:
@@ -27,7 +28,7 @@ if __name__ == "__main__":
         meta = json.load(open(json_files[0]))
         T_lidar_cam = get_lidar_to_cam("s110_camera_basler_south2_8mm", meta)
         K = get_camera_K("s110_camera_basler_south2_8mm", meta)
-        track(results)
+        tracks, next_id = track(results, img, tracks, next_id)
         cv2.imshow("img", img)
         if cv2.waitKey(1) & 0xFF == ord('q'): break
     cv2.destroyAllWindows()

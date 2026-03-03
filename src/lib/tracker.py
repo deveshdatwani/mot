@@ -34,9 +34,29 @@ class Tracker(object):
         return self.X[:2].flatten()
 
 
-def track(results):
+def track(results, img, object_log, next_id):
     res = results[0]
-    bboxes = []
-    for box in res.boxes:
-        bboxes.append(box.xyxy[0])
-    bboxes = np.array(bboxes)
+    if len(res.boxes) == 0: return {}, next_id
+    bboxes = res.boxes.xyxy.cpu().numpy()
+    cx = bboxes[:, 0] + ((bboxes[:, 2] - bboxes[:, 0]) / 2)
+    cy = bboxes[:, 1] + ((bboxes[:, 3] - bboxes[:, 1]) / 2)
+    current_centers = np.stack((cx, cy), axis=1)
+    new_object_log = {}
+    temp_old_log = object_log.copy()
+    for obj_pos in current_centers:
+        match_id = None
+        min_dist = 150
+        for obj_id, prev_pos in temp_old_log.items():
+            dist = np.linalg.norm(prev_pos - obj_pos)
+            if dist < min_dist:
+                min_dist = dist
+                match_id = obj_id
+        if match_id is not None:
+            new_object_log[match_id] = obj_pos
+            del temp_old_log[match_id]
+        else:
+            new_object_log[next_id] = obj_pos
+            match_id = next_id
+            next_id += 1
+        cv2.putText(img, f"ID: {match_id}", (int(obj_pos[0]), int(obj_pos[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    return new_object_log, next_id
