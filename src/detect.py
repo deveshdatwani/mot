@@ -2,9 +2,9 @@ import json, cv2, glob, os, numpy as np
 from ultralytics import YOLO
 import time
 from lib.tracker import SimpleTracker
-from lib.a9 import get_camera_K, get_lidar_to_cam, project_points, project_lidar_on_camera
+from lib.a9 import get_camera_K, get_lidar_to_cam, project_points
 from lib.fps import draw_fps    
-from lib.drawing import draw_detections
+from lib.drawing import draw_yolov8_detections, project_lidar_on_camera
 
 tracker = SimpleTracker()
 
@@ -26,6 +26,10 @@ if __name__ == "__main__":
         results = model(img, verbose=False)
         draw_yolov8_detections(img, results)
         prev_time = draw_fps(img, prev_time)
+        meta = json.load(open(json_files[0]))
+        T_lidar_cam = get_lidar_to_cam("s110_camera_basler_south2_8mm", meta)
+        K = get_camera_K("s110_camera_basler_south2_8mm", meta)
+        project_lidar_on_camera(img, T_lidar_cam, K, img_path, json_files)
         cv2.imshow("img", img)
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
