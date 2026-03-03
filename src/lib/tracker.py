@@ -1,41 +1,42 @@
 import numpy as np
 import cv2
 
-class SimpleTracker:
-    def __init__(self, dist_thresh=200, max_missed=5):
-        self.dist_thresh = dist_thresh
-        self.max_missed = max_missed
-        self.next_id = 0
-        self.tracks = {}  
 
-    def update(self, detections): 
-        centroids = []
-        for x1,y1,x2,y2 in detections:
-            centroids.append(np.array([(x1+x2)/2, (y1+y2)/2]))
-        used = set()
-        for tid in list(self.tracks.keys()):
-            prev_c = self.tracks[tid]["centroid"]
-            if len(centroids) == 0:
-                self.tracks[tid]["missed"] += 1
-                continue
-            dists = np.linalg.norm(np.array(centroids) - prev_c, axis=1)
-            idx = np.argmin(dists)
-            if dists[idx] < self.dist_thresh and idx not in used:
-                self.tracks[tid]["centroid"] = centroids[idx]
-                self.tracks[tid]["pts"].append(tuple(centroids[idx].astype(int)))
-                self.tracks[tid]["missed"] = 0
-                used.add(idx)
-            else:
-                self.tracks[tid]["missed"] += 1
-        for i,c in enumerate(centroids):
-            if i not in used:
-                self.tracks[self.next_id] = {
-                    "centroid": c,
-                    "pts": [tuple(c.astype(int))],
-                    "missed": 0
-                }
-                self.next_id += 1
-        for tid in list(self.tracks.keys()):
-            if self.tracks[tid]["missed"] > self.max_missed:
-                del self.tracks[tid]
-        return self.tracks
+class Tracker(object):
+    def __init__(self, max_miss=5):
+        self.next_id = 0
+        self.tracks = {}
+        self.max_miss = max_miss
+        self.dt = 1/30
+        self.A = np.array([[1, 0, self.dt, 0],
+                           [0, 1, 0, self.dt],
+                           [0, 0, 1, 0],
+                           [0, 0, 0, 1]])
+        self.X = np.array([[0], [0], [0], [0]]) 
+        self.Q = np.eye(4) * 0.01
+        self.R = np.eye(2) * 0.01
+        self.P = np.eye(4) * 0.01
+    
+    def predict(self, dt):
+        self.A[0, 2] = dt
+        self.A[1, 3] = dt
+        self.X = self.A @ self.X
+        self.P = (self.A @ (self.P @ self.A.T)) + self.Q
+        return self.X[:2].flatten()
+    
+    def update(self, z):
+        z = z.reshape((2, 1))
+        S = (self.H @ (self.P @ self.H.T)) + self.R
+        K = (self.P @ self.H.T) @ np.linalg.inv(S)
+        y = z - (self.H @ self.X)
+        self.X = self.X + (K @ y)
+        self.P = self.P - ((K @ self.H) @ self.P)
+        return self.X[:2].flatten()
+
+
+def track(results):
+    res = results[0]
+    bboxes = []
+    for box in res.boxes:
+        bboxes.append(box.xyxy[0])
+    bboxes = np.array(bboxes)
