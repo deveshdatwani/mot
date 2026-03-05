@@ -27,7 +27,7 @@ class KalmanFilter:
         self.miss_count = 0
         return self.X[:2].flatten()
 
-def track(results, img, object_log, next_id, max_miss=30):
+def track(results, img, object_log, next_id, max_miss=60):
     res = results[0]
     bboxes = res.boxes.xyxy.cpu().numpy() if len(res.boxes) > 0 else np.empty((0, 4))
     centers = np.column_stack([bboxes[:, 0] + (bboxes[:, 2] - bboxes[:, 0]) / 2, bboxes[:, 1] + (bboxes[:, 3] - bboxes[:, 1]) / 2])
@@ -37,7 +37,6 @@ def track(results, img, object_log, next_id, max_miss=30):
     if len(obj_ids) > 0 and len(centers) > 0:
         preds = np.array([object_log[oid].predict() for oid in obj_ids])
         dist_matrix = np.linalg.norm(preds[:, np.newaxis, :] - centers[np.newaxis, :, :], axis=2)
-        print(dist_matrix.shape)
         rows, cols = linear_sum_assignment(dist_matrix)
         for r, c in zip(rows, cols):
             if dist_matrix[r, c] < 50:
@@ -45,7 +44,7 @@ def track(results, img, object_log, next_id, max_miss=30):
                 kf = object_log[oid]
                 kf.update(centers[c])
                 kf.history.append((int(kf.X[0,0]), int(kf.X[1,0])))
-                if len(kf.history) > 20: kf.history.pop(0)
+                if len(kf.history) > 30: kf.history.pop(0)
                 new_object_log[oid] = kf
                 matched_det_indices.add(c)
     for oid in obj_ids:
@@ -54,7 +53,7 @@ def track(results, img, object_log, next_id, max_miss=30):
             kf.miss_count += 1
             if kf.miss_count <= max_miss:
                 kf.history.append((int(kf.X[0,0]), int(kf.X[1,0])))
-                if len(kf.history) > 20: kf.history.pop(0)
+                if len(kf.history) > 30: kf.history.pop(0)
                 new_object_log[oid] = kf
     for i, pos in enumerate(centers):
         if i not in matched_det_indices:
