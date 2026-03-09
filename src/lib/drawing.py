@@ -8,11 +8,11 @@ def draw_yolov8_detections(img, results):
         x1, y1, x2, y2 = map(int, box.xyxy[0])
         cls = int(box.cls[0].item())
         conf = box.conf[0].item()
-        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        draw_corner_box(img, (x1, y1), (x2, y2), (0, 255, 0), 1, 20)
         label = f"{res.names[cls]} {conf:.2f}"
         if box.id is not None:
             label = f"ID: {int(box.id.item())} {label}"
-        cv2.putText(img, label, (x1, y1 + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        cv2.putText(img, label, (x1, y2 + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
     return img
 
 def project_points(corners, T, K):
@@ -45,3 +45,16 @@ def project_lidar_on_camera(img, T_lidar_cam, K, img_path, json_files):
         y1=int(np.clip(y1,0,h_img-1));y2=int(np.clip(y2,0,h_img-1))
         cv2.rectangle(img,(x1,y1),(x2,y2),(0,255,0),2)
     return None
+
+def draw_corner_box(img, pt1, pt2, color, thickness, length=20):
+    length = int(0.3 * (pt2[1] - pt1[1]))
+    x1, y1 = pt1
+    x2, y2 = pt2
+    cv2.line(img, (x1, y1), (x1 + length, y1), color, thickness)
+    cv2.line(img, (x1, y1), (x1, y1 + length), color, thickness)
+    cv2.line(img, (x2, y1), (x2 - length, y1), color, thickness)
+    cv2.line(img, (x2, y1), (x2, y1 + length), color, thickness)
+    cv2.line(img, (x1, y2), (x1 + length, y2), color, thickness)
+    cv2.line(img, (x1, y2), (x1, y2 - length), color, thickness)
+    cv2.line(img, (x2, y2), (x2 - length, y2), color, thickness)
+    cv2.line(img, (x2, y2), (x2, y2 - length), color, thickness)
