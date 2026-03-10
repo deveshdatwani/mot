@@ -6,4 +6,4 @@ MOT
 </video>
 
 
-[![Watch the video]()](assets/sample_tracking.gif)
+![til](./assets/sample_tracking.gif)
