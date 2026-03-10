@@ -1,4 +1,4 @@
-import cv2
+import cv2, time
 import os, json, numpy as np
 
 
@@ -58,3 +58,10 @@ def draw_corner_box(img, pt1, pt2, color, thickness, length=20):
     cv2.line(img, (x1, y2), (x1, y2 - length), color, thickness)
     cv2.line(img, (x2, y2), (x2 - length, y2), color, thickness)
     cv2.line(img, (x2, y2), (x2, y2 - length), color, thickness)
+
+def draw_fps(frame, prev_time):
+    curr_time = time.time()
+    fps = 1 / (curr_time - prev_time) if prev_time != 0 else 0
+    color = (0, 255, 255) if fps > 8 else (0, 0, 255)
+    cv2.putText(frame, f"FPS: {fps:.1f}", (10,30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 1)
+    return curr_time
