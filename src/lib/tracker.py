@@ -2,7 +2,6 @@ import numpy as np
 import cv2
 from scipy.optimize import linear_sum_assignment
 
-
 class KalmanFilter:
     def __init__(self, x, y, timestamp):
         self.last_time = timestamp
