@@ -9,3 +9,5 @@ Sample tracking @ 2026-03-10
 ![til](./assets/sample_tracking.gif)
 
 Need to build tracker resilience / robustness. Just beginning this project.
+
+Ps- weak domain adoption by yolov8n. 
