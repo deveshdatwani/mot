@@ -4,8 +4,8 @@ MOT
     <source src="./assets/sample_tracking.mp4" type="video/mp4">
 </video>
 
-Sampel tracking @ 2026-03-10
+Sample tracking @ 2026-03-10
 
 ![til](./assets/sample_tracking.gif)
 
-Needs tracker resilience.
+Need to build tracker resilience / robustness. Just beginning this project.
