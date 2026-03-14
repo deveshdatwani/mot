@@ -8,27 +8,27 @@ from lib.rpi_cam import capture_rpi_camera
 from queue import Queue
 from threading import Thread
 from lib.buffer import Buffer
+import time
 
 GLOBAL = 0
 frame_queue = Queue(maxsize=1) 
-model = YOLO("/home/deveshdatwani/Downloads/yolov8n.pt")
+model = YOLO("/home/deveshdatwani/Downloads/yolov8s.pt")
 img_dir = "/home/deveshdatwani/mot/data/a9_dataset_r02_s01/images/s110_camera_basler_south2_8mm"
 json_dir = "/home/deveshdatwani/mot/data/a9_dataset_r02_s01/labels_point_clouds/s110_lidar_ouster_south"
 img_files = sorted(glob.glob(os.path.join(img_dir, "*.jpg")))
 json_files = sorted(glob.glob(os.path.join(json_dir, "*.json")))
-thread = Thread(target=capture_rpi_camera, args=(frame_queue,))
 
 if __name__ == "__main__":
     object_log, next_id = {}, 0
+    cap = cv2.VideoCapture("/home/deveshdatwani/Downloads/cv_coding_challenge/cv_coding_challenge/data/dynamic_to_static.mp4")
     tracks = {}
-    buffer = Buffer()
-    thread.start()
     prev_time = 0
     meta = json.load(open(json_files[0]))
     T_lidar_cam = get_lidar_to_cam("s110_camera_basler_south2_8mm", meta)
     K = get_camera_K("s110_camera_basler_south2_8mm", meta)
     while True:
-        ts, img = frame_queue.get()
+        ts = time.time()
+        ret, img = cap.read()
         results = model(img, verbose=False)
         draw_yolov8_detections(img, results)
         tracks, next_id = track(results, img, ts, tracks, next_id, 50)
