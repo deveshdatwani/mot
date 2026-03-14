@@ -21,6 +21,6 @@ def nms(bboxes):
         h = np.maximum(0, yy2 - yy1)
         inter = w * h
         ovr = inter / (areas[order[0]] + areas[order[1:]] - inter)
-        inds = np.where(ovr <= 0.5)[0]
+        inds = np.where(ovr <= 0.8)[0]
         order = order[inds + 1]
     return keep

@@ -1,97 +1,156 @@
 import numpy as np
 import cv2
-from scipy.optimize import linear_sum_assignment
+from lib.nms import nms
 
-class KalmanFilter:
-    def __init__(self, x, y, timestamp):
-        self.last_time = timestamp
-        self.X = np.array([[x], [y], [0], [0]], dtype=np.float32)
-        self.H = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float32)
-        self.R = np.eye(2, dtype=np.float32) * 0.1 
-        self.P = np.eye(4, dtype=np.float32) * 100.0
+class Feature:
+    def __init__(self, x, y, score):
+        self.pos = np.array([x, y], dtype=np.float32)
+        self.score = score  # The corner quality score
+        self.age = 0
+
+    def update(self, new_x, new_y):
+        self.pos = np.array([new_x, new_y], dtype=np.float32)
+        self.age += 1
+
+class PlaneTracker:
+    def __init__(self, plane_id, bbox, gray_img):
+        self.id = plane_id
+        self.bbox = bbox
+        self.features = []
         self.miss_count = 0
         self.history = []
+        self.seed_features(bbox, gray_img)
 
-    def predict(self, current_time):
-        dt = current_time - self.last_time
-        self.last_time = current_time
-        A = np.array([
-            [1, 0, dt, 0],
-            [0, 1, 0, dt],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ], dtype=np.float32)
-        q_weight = 15.0
-        Q = np.eye(4, dtype=np.float32) * q_weight * dt
-        self.X = A @ self.X
-        self.P = (A @ self.P @ A.T) + Q
-        return self.X[:2].flatten()
+    def seed_features(self, bbox, gray_img):
+        x1, y1, x2, y2 = map(int, bbox)
+        h, w = gray_img.shape
+        x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
+        if x2 <= x1 or y2 <= y1: return
+        
+        mask = np.zeros_like(gray_img)
+        mask[y1:y2, x1:x2] = 255
+        
+        # goodFeaturesToTrack returns points sorted by quality score descending
+        # We limit to 20 high-score points as requested
+        pts = cv2.goodFeaturesToTrack(gray_img, maxCorners=20, qualityLevel=0.05, minDistance=5, mask=mask)
+        
+        if pts is not None:
+            # We don't want to double-count features if we are re-seeding
+            existing_pts = np.array([f.pos for f in self.features]) if self.features else np.empty((0,2))
+            
+            for p in pts:
+                new_p = p[0]
+                if len(existing_pts) > 0:
+                    dist = np.linalg.norm(existing_pts - new_p, axis=1)
+                    if np.any(dist < 5): continue # Skip if too close to an existing tracked feature
+                
+                self.features.append(Feature(new_p[0], new_p[1], score=1.0))
+            
+            # Final prune to ensure we never exceed 20 total
+            if len(self.features) > 20:
+                self.features.sort(key=lambda x: x.age, reverse=True) # Keep the ones we've tracked longest
+                self.features = self.features[:20]
 
-    def update(self, z):
-        z = np.array(z, dtype=np.float32).reshape((2, 1))
-        S = (self.H @ self.P @ self.H.T) + self.R
-        K = self.P @ self.H.T @ np.linalg.inv(S)
-        self.X = self.X + (K @ (z - (self.H @ self.X)))
-        self.P = (np.eye(4, dtype=np.float32) - (K @ self.H)) @ self.P
-        self.miss_count = 0
-        return self.X[:2].flatten()
+    def get_weighted_center(self):
+        if not self.features: return None
+        pts = np.array([f.pos for f in self.features])
+        # Weight heavily by age to trust established points over new seeds
+        weights = np.array([f.age + 1 for f in self.features])
+        
+        median = np.median(pts, axis=0)
+        dist = np.linalg.norm(pts - median, axis=1)
+        mask = dist < (np.std(dist) * 2 + 1)
+        
+        if not np.any(mask): return median
+        return np.average(pts[mask], axis=0, weights=weights[mask])
 
-def track(results, img, current_timestamp, object_log, next_id, max_miss=60):
+def track_airplanes(results, frame, prev_gray, object_log, next_id):
+    curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    # 1. Optical Flow on High-Score Features
+    if prev_gray is not None and object_log:
+        for tracker in object_log.values():
+            if not tracker.features: continue
+            
+            p0 = np.array([f.pos for f in tracker.features], dtype=np.float32)
+            p1, st, err = cv2.calcOpticalFlowPyrLK(prev_gray, curr_gray, p0, None, winSize=(21,21), maxLevel=3)
+            
+            # Filter by status and error (discard high-error flow)
+            valid_features = []
+            for i, status in enumerate(st):
+                if status == 1 and err[i] < 15: # Threshold error to discard drifting points
+                    tracker.features[i].update(p1[i][0], p1[i][1])
+                    valid_features.append(tracker.features[i])
+            tracker.features = valid_features
+            
+            center = tracker.get_weighted_center()
+            if center is not None and tracker.bbox is not None:
+                w, h = tracker.bbox[2]-tracker.bbox[0], tracker.bbox[3]-tracker.bbox[1]
+                tracker.bbox = [center[0]-w/2, center[1]-h/2, center[0]+w/2, center[1]+h/2]
+
+    # 2. YOLO Detection & Association
     res = results[0]
-    bboxes = res.boxes.xyxy.cpu().numpy() if len(res.boxes) > 0 else np.empty((0, 4))
-    centers = np.column_stack([
-        bboxes[:, 0] + (bboxes[:, 2] - bboxes[:, 0]) / 2, 
-        bboxes[:, 1] + (bboxes[:, 3] - bboxes[:, 1]) / 2
-    ])
-    obj_ids = list(object_log.keys())
-    new_object_log = {}
-    matched_det_indices = set()
-    if len(obj_ids) > 0:
-        preds = np.array([object_log[oid].predict(current_timestamp) for oid in obj_ids])
-        if len(centers) > 0:
-            dist_matrix = np.linalg.norm(preds[:, np.newaxis, :] - centers[np.newaxis, :, :], axis=2)
-            rows, cols = linear_sum_assignment(dist_matrix)            
-            for r, c in zip(rows, cols):
-                if dist_matrix[r, c] < 50:
-                    oid = obj_ids[r]
-                    kf = object_log[oid]
-                    kf.update(centers[c])
-                    kf.history.append((int(kf.X[0,0]), int(kf.X[1,0])))
-                    if len(kf.history) > 30: kf.history.pop(0)
-                    new_object_log[oid] = kf
-                    matched_det_indices.add(c)
-    for oid in obj_ids:
-        if oid not in new_object_log:
-            kf = object_log[oid]
-            kf.miss_count += 1
-            if kf.miss_count <= max_miss:
-                kf.history.append((int(kf.X[0,0]), int(kf.X[1,0])))
-                if len(kf.history) > 30: kf.history.pop(0)
-                new_object_log[oid] = kf
-    for i, pos in enumerate(centers):
-        if i not in matched_det_indices:
-            new_object_log[next_id] = KalmanFilter(pos[0], pos[1], current_timestamp)
-            next_id += 1
-    for oid, kf in new_object_log.items():
-        p = kf.X[:2].flatten()
-        color = (0, 255, 0) if kf.miss_count == 0 else (0, 0, 255)
-        cv2.putText(img, f"ID: {oid}", (int(p[0]), int(p[1]) - 10), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-        if len(kf.history) > 1:
-            cv2.polylines(img, [np.array(kf.history).reshape((-1, 1, 2))], False, color, 2)
-    current_ids = list(new_object_log.keys())
-    states = np.array([kf.X.flatten() for kf in new_object_log.values()])
-    if len(states) > 1:
-        dist_matrix = np.linalg.norm(states[:, np.newaxis, :2] - states[np.newaxis, :, :2], axis=2)
-        np.fill_diagonal(dist_matrix, np.inf)
-        rows, cols = np.where(dist_matrix < 10)
-        merged_indices = set()
-        for r, c in zip(rows, cols):
-            if r not in merged_indices and c not in merged_indices:
-                primary_id = current_ids[r]
-                duplicate_id = current_ids[c]
-                if new_object_log[duplicate_id].miss_count < new_object_log[primary_id].miss_count:
-                    new_object_log[primary_id].miss_count = new_object_log[duplicate_id].miss_count
-                new_object_log.pop(duplicate_id)
-                merged_indices.add(c)
-    return new_object_log, next_id
+    air_idx = [i for i, c in enumerate(res.boxes.cls.cpu().numpy()) if res.names[int(c)].lower() == 'airplane']
+    curr_bboxes = res.boxes.xyxy.cpu().numpy()[air_idx]
+    
+    matched_ids = set()
+    new_track_candidates = {}
+
+    for bbox in curr_bboxes:
+        best_id, max_age_sum = -1, -1
+        for pid, tracker in object_log.items():
+            if pid in matched_ids: continue
+            
+            # Count points inside the new detection box
+            in_box = [f for f in tracker.features if bbox[0]<=f.pos[0]<=bbox[2] and bbox[1]<=f.pos[1]<=bbox[3]]
+            if in_box:
+                age_sum = sum(f.age for f in in_box)
+                if age_sum > max_age_sum:
+                    max_age_sum, best_id = age_sum, pid
+        
+        if best_id != -1:
+            tracker = object_log[best_id]
+            tracker.bbox, tracker.miss_count = bbox, 0
+            # Replenish up to 20 if points were lost
+            if len(tracker.features) < 15:
+                tracker.seed_features(bbox, curr_gray)
+            matched_ids.add(best_id)
+        else:
+            # Overlap check for new IDs
+            is_overlapping = False
+            for pid in matched_ids:
+                b = object_log[pid].bbox
+                iou = max(0, min(bbox[2], b[2]) - max(bbox[0], b[0])) * max(0, min(bbox[3], b[3]) - max(bbox[1], b[1]))
+                if iou > 0:
+                    is_overlapping = True; break
+            
+            if not is_overlapping:
+                new_track_candidates[next_id] = PlaneTracker(next_id, bbox, curr_gray)
+                next_id += 1
+
+    object_log.update(new_track_candidates)
+    final_log = {}
+    
+    # 3. Cleanup and Render
+    for pid, tracker in object_log.items():
+        if pid not in matched_ids and pid not in new_track_candidates:
+            tracker.miss_count += 1
+            
+        if tracker.miss_count < 30 and len(tracker.features) > 2:
+            final_log[pid] = tracker
+            pos = tracker.get_weighted_center()
+            if pos is not None:
+                tracker.history.append((int(pos[0]), int(pos[1])))
+                if len(tracker.history) > 30: tracker.history.pop(0)
+                
+                clr = (0, 255, 0) if tracker.miss_count == 0 else (0, 0, 255)
+                cv2.putText(frame, f"PLANE {pid}", (int(pos[0]), int(pos[1])-15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, clr, 2)
+                
+                # Draw only the elite 20 features
+                for f in tracker.features:
+                    cv2.circle(frame, (int(f.pos[0]), int(f.pos[1])), 3, (255, 0, 255), -1)
+                
+                if len(tracker.history) > 1:
+                    cv2.polylines(frame, [np.array(tracker.history).reshape((-1, 1, 2))], False, clr, 2)
+    
+    return final_log, next_id, curr_gray
