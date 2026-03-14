@@ -63,4 +63,32 @@ def draw_fps(frame, ts, prev_time):
     color = (0, 255, 255) if fps > 8 else (0, 0, 255)
     cv2.putText(frame, f"FPS: {fps:.1f}", (10,30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
     prev_time = ts
-    return prev_time
+    return prev_time, frame
+
+def draw_custom_tracks(img, object_log):
+    from lib.drawing import draw_corner_box
+    for pid, t in object_log.items():
+        x1, y1, x2, y2 = map(int, t.bbox)
+        color = (0, 255, 0)
+        draw_corner_box(img, (x1, y1), (x2, y2), color, 2, 20)
+        cv2.putText(img, f"ID: {pid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        curr_pos = (int((x1 + x2) / 2), int((y1 + y2) / 2))
+        if len(t.history) == 0 or np.linalg.norm(np.array(t.history[-1]) - curr_pos) > 2:
+            t.history.append(curr_pos)
+        if len(t.history) > 40: t.history.pop(0)
+        if len(t.history) > 1:
+            cv2.polylines(img, [np.array(t.history, np.int32).reshape((-1, 1, 2))], False, color, 1)
+        for f in t.features:
+            cv2.circle(img, (int(f.pos[0]), int(f.pos[1])), 2, (0, 255, 255), -1)
+
+def draw_yolo_seg(img, results, object_log):
+    if results[0].masks is not None:
+        mask_img = results[0].plot(labels=False, boxes=False)
+        cv2.addWeighted(mask_img, 0.4, img, 0.6, 0, img)
+    for pid, t in object_log.items():
+        x1, y1, x2, y2 = map(int, t.bbox)
+        draw_corner_box(img, (x1, y1), (x2, y2), t.color, 2)
+        cv2.putText(img, f"ID: {pid}", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, t.color, 2)
+        if len(t.history) > 1:
+            cv2.polylines(img, [np.array(t.history, np.int32).reshape((-1,1,2))], False, t.color, 2)
+    return img
