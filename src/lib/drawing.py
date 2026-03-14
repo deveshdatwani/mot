@@ -1,4 +1,4 @@
-import cv2, time
+import cv2, time, json
 import os, json, numpy as np
 
 def draw_yolov8_detections(img, results):
@@ -92,3 +92,21 @@ def draw_yolo_seg(img, results, object_log):
         if len(t.history) > 1:
             cv2.polylines(img, [np.array(t.history, np.int32).reshape((-1,1,2))], False, t.color, 2)
     return img
+
+TRACK_COLORS = [
+    (0, 255, 0), (0, 0, 255), (0, 0, 255), 
+    (255, 255, 0), (0, 255, 255), (255, 0, 255)
+]
+
+def draw_fyveby_gt(frame, frame_idx, annotations):  
+    for ann in annotations:
+        tid = ann["track_id"]
+        x1, y1, x2, y2 = [int(v) for v in ann["bbox"]]
+        color = TRACK_COLORS[tid % len(TRACK_COLORS)]
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        label = f"ID:{tid} {ann.get('class', 'aircraft')}"
+        cv2.putText(
+            frame, label, (x1, y1 - 8), 
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2
+        )
+    return frame
